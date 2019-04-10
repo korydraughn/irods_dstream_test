@@ -16,12 +16,14 @@
 #include <mutex>
 #include <fstream>
 #include <string>
+#include <iterator>
+#include <algorithm>
 
 #ifdef USE_FSTREAM
     #define stream_type std::ofstream
     #define the_path "./by_fstream.txt"
 #else
-    #define stream_type irods::experimental::odstream
+    #define stream_type irods::experimental::io::odstream
     #define the_path "/tempZone/home/rods/pt.txt"
 #endif
 
@@ -45,13 +47,30 @@ int main(int _argc, char* _argv[])
         constexpr int thread_count = 6;
         irods::connection_pool conn_pool{thread_count, host, 1247, "rods", "tempZone", 600};
 
+        {
+            auto conn = conn_pool.get_connection();
+            irods::experimental::io::client::default_transport tp{conn};
+            irods::experimental::io::idstream is{tp, "/tempZone/home/rods/f.txt"};
+
+            if (is)
+            {
+                std::string data;
+                std::istream_iterator<char> it{is};
+                //std::copy(it, std::istream_iterator<char>{}, std::back_inserter(data));
+                std::copy_n(it, 100, std::back_inserter(data));
+                std::cout << data << '\n';
+            }
+
+            return 0;
+        }
+
         // Create the data object if it doesn't exist already.
         // This is required before any parallel transfer occurs.
         // If the data object is not created first, then the transfer hangs.
 #ifndef USE_FSTREAM
         {
             auto conn = conn_pool.get_connection();
-            irods::experimental::default_transport dtp{conn};
+            irods::experimental::io::client::default_transport dtp{conn};
             stream_type{dtp, path, resc};
         }
 #else
@@ -73,7 +92,7 @@ int main(int _argc, char* _argv[])
                 buf.push_back('\n');
 
                 auto conn = conn_pool.get_connection();
-                irods::experimental::default_transport dtp{conn};
+                irods::experimental::io::client::default_transport dtp{conn};
 
 #ifndef USE_FSTREAM
                 stream_type out{dtp, path, resc, std::ios_base::in | std::ios_base::out};
@@ -115,21 +134,21 @@ int main(int _argc, char* _argv[])
             // Write the last byte to the data object to guarantee that
             // the correct size is recorded in the catalog.
             auto conn = conn_pool.get_connection();
-            irods::experimental::default_transport dtp{conn};
+            irods::experimental::io::client::default_transport dtp{conn};
             stream_type out{dtp, path, resc, std::ios_base::app};
             char c = '9';
             out.write(&c, 1);
+
+            std::string json = R"_({"fd": )_";
+            json += std::to_string(out.file_descriptor());
+            json += '}';
+            std::cout << "input => " << json << '\n';
+
+            char* json_output{};
+
+            if (const auto ec = rc_get_file_descriptor_info(&static_cast<rcComm_t&>(conn), json.c_str(), &json_output); ec == 0)
+                std::cout << "output => " << nlohmann::json::parse(json_output).dump(4) << '\n';
         }
-
-        std::string json = R"_({"fd": )_";
-        json += std::to_string(out.file_descriptor());
-        json += '}';
-        std::cout << "input => " << json << '\n';
-
-        char* json_output{};
-
-        if (const auto ec = rc_get_file_descriptor_info(&static_cast<rcComm_t&>(conn), json.c_str(), &json_output); ec == 0)
-            std::cout << "output => " << nlohmann::json::parse(json_output).dump(4) << '\n';
 
         /*
          What might a parallel dstream interface look like?
