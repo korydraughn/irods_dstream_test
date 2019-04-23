@@ -47,23 +47,6 @@ int main(int _argc, char* _argv[])
         constexpr int thread_count = 6;
         irods::connection_pool conn_pool{thread_count, host, 1247, "rods", "tempZone", 600};
 
-        {
-            auto conn = conn_pool.get_connection();
-            irods::experimental::io::client::default_transport tp{conn};
-            irods::experimental::io::idstream is{tp, "/tempZone/home/rods/f.txt"};
-
-            if (is)
-            {
-                std::string data;
-                std::istream_iterator<char> it{is};
-                //std::copy(it, std::istream_iterator<char>{}, std::back_inserter(data));
-                std::copy_n(it, 100, std::back_inserter(data));
-                std::cout << data << '\n';
-            }
-
-            return 0;
-        }
-
         // Create the data object if it doesn't exist already.
         // This is required before any parallel transfer occurs.
         // If the data object is not created first, then the transfer hangs.
