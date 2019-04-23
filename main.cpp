@@ -1,5 +1,5 @@
 #include <irods/dstream.hpp>
-#include <irods/transport/default_transport.hpp>
+#include <irods/transport/udt_transport.hpp>
 #include <irods/connection_pool.hpp>
 #include <irods/irods_client_api_table.hpp>
 #include <irods/irods_pack_table.hpp>
@@ -53,7 +53,7 @@ int main(int _argc, char* _argv[])
 #ifndef USE_FSTREAM
         {
             auto conn = conn_pool.get_connection();
-            irods::experimental::io::client::default_transport dtp{conn};
+            irods::experimental::io::client::udt_transport dtp{conn};
             stream_type{dtp, path, resc};
         }
 #else
@@ -75,7 +75,7 @@ int main(int _argc, char* _argv[])
                 buf.push_back('\n');
 
                 auto conn = conn_pool.get_connection();
-                irods::experimental::io::client::default_transport dtp{conn};
+                irods::experimental::io::client::udt_transport dtp{conn};
 
 #ifndef USE_FSTREAM
                 stream_type out{dtp, path, resc, std::ios_base::in | std::ios_base::out};
@@ -117,7 +117,7 @@ int main(int _argc, char* _argv[])
             // Write the last byte to the data object to guarantee that
             // the correct size is recorded in the catalog.
             auto conn = conn_pool.get_connection();
-            irods::experimental::io::client::default_transport dtp{conn};
+            irods::experimental::io::client::udt_transport dtp{conn};
             stream_type out{dtp, path, resc, std::ios_base::app};
             char c = '9';
             out.write(&c, 1);
