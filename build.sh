@@ -18,4 +18,5 @@ clang++ -std=c++17 -stdlib=libc++ -nostdinc++ -Wall -Wextra -O2 \
         -lirods_server \
         -lirods_plugin_dependencies \
         -lirods_get_file_descriptor_info_client \
-        -ludt
+        -ludt \
+        -lboost_system

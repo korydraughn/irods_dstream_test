@@ -1,9 +1,13 @@
 #include <irods/dstream.hpp>
-#include <irods/transport/udt_transport.hpp>
+#include <irods/transport/default_transport.hpp>
+//#include <irods/transport/udt_transport.hpp>
+#include <irods/thread_pool.hpp>
 #include <irods/connection_pool.hpp>
 #include <irods/irods_client_api_table.hpp>
 #include <irods/irods_pack_table.hpp>
 #include <irods/plugins/api/get_file_descriptor_info.h>
+#include <irods/filesystem.hpp>
+#include <irods/query_processor.hpp>
 
 #include "json.hpp"
 
@@ -18,6 +22,7 @@
 #include <string>
 #include <iterator>
 #include <algorithm>
+#include <chrono>
 
 #ifdef USE_FSTREAM
     #define stream_type std::ofstream
@@ -26,6 +31,81 @@
     #define stream_type irods::experimental::io::odstream
     #define the_path "/tempZone/home/rods/pt.txt"
 #endif
+
+template <typename Transport>
+auto put_speed_test(Transport& _tp, const char* _from, const char* _to)
+{
+    using clock = std::chrono::steady_clock;
+    using time_point = std::chrono::time_point<clock>;
+
+    time_point start = clock::now();
+
+    if (std::ifstream in{_from, std::ios_base::binary}; in) {
+        if (irods::experimental::io::odstream out{_tp, _to, std::ios_base::binary}; out) {
+            char buf[4 * 1024 * 1024]{};
+
+            start = clock::now();
+
+            while (in) {
+                in.read(buf, sizeof(buf));
+                out.write(buf, in.gcount());
+            }
+
+            /*
+            std::string line;
+            
+            start = clock::now();
+
+            while (std::getline(in, line)) {
+                out << line;
+            }
+            */
+        }
+        else {
+            std::cout << "Could not open data object for writing.\n";
+        }
+    }
+    else {
+        std::cout << "Could not open file for reading.\n";
+    }
+
+    return clock::now() - start;
+}
+
+template <typename Transport>
+auto get_speed_test(Transport& _tp, const char* _from)
+{
+    using clock = std::chrono::steady_clock;
+    using time_point = std::chrono::time_point<clock>;
+
+    time_point start = clock::now();
+
+    if (irods::experimental::io::idstream in{_tp, _from, std::ios_base::binary}; in) {
+        /*
+        std::string line;
+        std::int64_t count = 0;
+
+        start = clock::now();
+
+        while (std::getline(in, line)) {
+            ++count;
+        }
+        */
+
+        char buf[4 * 1024 * 1024]{};
+
+        start = clock::now();
+
+        while (in) {
+            in.read(buf, sizeof(buf));
+        }
+    }
+    else {
+        std::cout << "Could not open data object for reading.\n";
+    }
+
+    return clock::now() - start;
+}
 
 int main(int _argc, char* _argv[])
 {
@@ -43,7 +123,69 @@ int main(int _argc, char* _argv[])
     auto& pck_table = irods::get_pack_table();
     init_api_table(api_table, pck_table);
 
+#if 0
     try {
+        namespace fs = irods::experimental::filesystem;
+
+        irods::connection_pool conn_pool{1, "152.54.6.174", 1247, "rods", "tempZone", 600};
+        //irods::connection_pool conn_pool{1, "kdd-ws", 1247, "rods", "tempZone", 600};
+        //irods::connection_pool conn_pool{1, "kory-thinkpad", 1247, "rods", "tempZone", 600};
+
+        auto conn = conn_pool.get_connection();
+
+        {
+            irods::experimental::io::client::default_transport tp{conn};
+            std::cout << "Default Transport - Time Elapsed (Put) = " << std::chrono::duration<double>(put_speed_test(tp, _argv[1], _argv[2])).count() << "s\n";
+        }
+
+        {
+            irods::experimental::io::client::default_transport tp{conn};
+            std::cout << "Default Transport - Time Elapsed (Get) = " << std::chrono::duration<double>(get_speed_test(tp, _argv[2])).count() << "s\n";
+        }
+
+        std::cout << '\n';
+
+        {
+            irods::experimental::io::client::udt_transport tp{conn};
+            fs::path to = _argv[2];
+            to += ".udt";
+            std::cout << "    UDT Transport - Time Elapsed (Put) = " << std::chrono::duration<double>(put_speed_test(tp, _argv[1], to.c_str())).count() << "s\n";
+        }
+
+        {
+            irods::experimental::io::client::udt_transport tp{conn};
+            std::cout << "    UDT Transport - Time Elapsed (Get) = " << std::chrono::duration<double>(get_speed_test(tp, _argv[2])).count() << "s\n";
+        }
+    }
+    catch (const std::exception& e) {
+        std::cout << e.what() << '\n';
+    }
+
+    return 0;
+#endif
+
+    try {
+        {
+            using query_proc = irods::query_processor<rcComm_t>;
+
+            const char* query = "select COLL_NAME where COLL_PARENT_NAME = '/tempZone/home'";
+
+            query_proc qp{query, [](const auto& _row) {
+                std::cout << "COLL_NAME = " << _row[0] << '\n';
+            }};
+
+            irods::thread_pool tp{4};
+            irods::connection_pool cp{4, "kdd-ws", 1247, "rods", "tempZone", 600};
+
+            auto errors = qp.execute(tp, cp.get_connection());
+
+            for (auto&& e : errors.get()) {
+                std::cout << "ec: " << std::get<0>(e) << ", msg: " << std::get<1>(e) << '\n';
+            }
+
+            return 0;
+        }
+
         constexpr int thread_count = 6;
         irods::connection_pool conn_pool{thread_count, host, 1247, "rods", "tempZone", 600};
 
@@ -53,7 +195,8 @@ int main(int _argc, char* _argv[])
 #ifndef USE_FSTREAM
         {
             auto conn = conn_pool.get_connection();
-            irods::experimental::io::client::udt_transport dtp{conn};
+            irods::experimental::io::client::default_transport dtp{conn};
+            //irods::experimental::io::client::udt_transport dtp{conn};
             stream_type{dtp, path, resc};
         }
 #else
@@ -75,7 +218,8 @@ int main(int _argc, char* _argv[])
                 buf.push_back('\n');
 
                 auto conn = conn_pool.get_connection();
-                irods::experimental::io::client::udt_transport dtp{conn};
+                irods::experimental::io::client::default_transport dtp{conn};
+                //irods::experimental::io::client::udt_transport dtp{conn};
 
 #ifndef USE_FSTREAM
                 stream_type out{dtp, path, resc, std::ios_base::in | std::ios_base::out};
@@ -117,7 +261,8 @@ int main(int _argc, char* _argv[])
             // Write the last byte to the data object to guarantee that
             // the correct size is recorded in the catalog.
             auto conn = conn_pool.get_connection();
-            irods::experimental::io::client::udt_transport dtp{conn};
+            irods::experimental::io::client::default_transport dtp{conn};
+            //irods::experimental::io::client::udt_transport dtp{conn};
             stream_type out{dtp, path, resc, std::ios_base::app};
             char c = '9';
             out.write(&c, 1);
